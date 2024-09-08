@@ -1,7 +1,11 @@
+#ifndef WINDOWS
 #include <asm-generic/ioctls.h>
+#include <sys/ioctl.h>
+#else
+#include <windows.h>
+#endif
 #include <math.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -81,7 +85,18 @@ vec3 rotation_pivot= (vec3){0.0f, 0.0f, 4.0f};
 
 size_t counter;
 
+#ifdef WINDOWS
+HANDLE hConsole;
+COORD buffer_size;
+CONSOLE_SCREEN_BUFFER_INFO csbi;
+#endif
+
 int main(void) {
+	#ifdef WINDOWS
+	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+	GetConsoleScreenBufferInfo(hConsole, &csbi);
+	buffer_size = csbi.dwSize;
+	#endif
 	counter = 0;
 	signal(SIGINT, sigint_handle);
 	screen_buffer.buffer = (char*)malloc(100000);
@@ -149,9 +164,22 @@ int main(void) {
 
 
 void update_screen_dimensions() {
+	#ifndef WINDOWS
 	struct winsize winsize;
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &winsize);
 	screen_dimensions = (coord){ winsize.ws_col - 1, winsize.ws_row};
+	#else
+	CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+
+	if (GetConsoleScreenBufferInfo(hConsole, &consoleInfo)) {
+		int columns = consoleInfo.srWindow.Right - consoleInfo.srWindow.Left;
+		int rows = consoleInfo.srWindow.Bottom - consoleInfo.srWindow.Top;
+		screen_dimensions = (coord){ columns, rows };
+	} else {
+		perror("Can't get terminal size.");
+		exit(1);
+	}
+	#endif
 }
 
 void update_screen_buffer() {
@@ -219,8 +247,17 @@ void render() {
 }
 
 void draw_screen_buffer() {
+	#ifndef WINDOWS
 	printf("\x1b[2J\x1b[H");
-	printf("%.*s\n", screen_buffer.buffer_size ,screen_buffer.buffer);
+	#else
+	DWORD consoleSize, charsWritten;
+	COORD topLeft = { 0, 0 };
+	consoleSize = csbi.dwSize.X * csbi.dwSize.Y;
+	FillConsoleOutputCharacter(hConsole, (TCHAR)' ', consoleSize, topLeft, &charsWritten);
+	FillConsoleOutputAttribute(hConsole, csbi.wAttributes, consoleSize, topLeft, &charsWritten);
+	SetConsoleCursorPosition(hConsole, topLeft);
+	#endif
+	puts(screen_buffer.buffer);
 }
 
 
@@ -267,7 +304,11 @@ coord map_rel_to_abs(vec2 pos) {
 }
 
 void sigint_handle(int signal) {
+	#ifndef WINDOWS
 	printf("\x1b[2J\x1b[H");
+	#else
+	system("cls");
+	#endif
 	free(screen_buffer.buffer);
 	free(cube_vertices);
 	free(cube_lines);
